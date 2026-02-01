@@ -519,6 +519,39 @@ namespace OpenSLLWrapper
             return diff == 0;
         }
 
+        /// <summary>
+        /// Protect PEM bytes using Windows DPAPI (ProtectedData) and write the protected blob to disk.
+        /// This helper is Windows-only and will throw <see cref="PlatformNotSupportedException"/> on non-Windows platforms.
+        /// </summary>
+        /// <param name="path">Path to write protected blob.</param>
+        /// <param name="pemBytes">PEM bytes to protect/write.</param>
+        /// <param name="forMachine">If true, protect for local machine; otherwise protect for current user.</param>
+        public static void SavePemFileDpapiWindows(string path, byte[] pemBytes, bool forMachine = false)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(nameof(path));
+            if (pemBytes == null) throw new ArgumentNullException(nameof(pemBytes));
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) throw new PlatformNotSupportedException("DPAPI is supported only on Windows");
+
+            var scope = forMachine ? System.Security.Cryptography.DataProtectionScope.LocalMachine : System.Security.Cryptography.DataProtectionScope.CurrentUser;
+            byte[] protectedBytes = System.Security.Cryptography.ProtectedData.Protect(pemBytes, null, scope);
+            File.WriteAllBytes(path, protectedBytes);
+        }
+
+        /// <summary>
+        /// Read and unprotect a DPAPI-protected PEM file written with <see cref="SavePemFileDpapiWindows"/>.
+        /// This helper is Windows-only and will throw <see cref="PlatformNotSupportedException"/> on non-Windows platforms.
+        /// </summary>
+        public static byte[] LoadPemFileDpapiWindows(string path, bool forMachine = false)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(nameof(path));
+            if (!File.Exists(path)) throw new FileNotFoundException("File not found", path);
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) throw new PlatformNotSupportedException("DPAPI is supported only on Windows");
+
+            byte[] blob = File.ReadAllBytes(path);
+            var scope = forMachine ? System.Security.Cryptography.DataProtectionScope.LocalMachine : System.Security.Cryptography.DataProtectionScope.CurrentUser;
+            return System.Security.Cryptography.ProtectedData.Unprotect(blob, null, scope);
+        }
+
         // --- Encrypted PKCS#8 support ---
         private class StringPasswordFinder : Org.BouncyCastle.OpenSsl.IPasswordFinder
         {

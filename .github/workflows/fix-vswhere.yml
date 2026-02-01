@@ -1,0 +1,29 @@
+name: Fix vswhere access
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  locate-vs:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Locate Visual Studio via vswhere (fixed)
+        shell: pwsh
+        run: |
+          Write-Host "Locating Visual Studio installation via vswhere..."
+          # Use brace form to access an environment variable with parentheses in its name
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'
+          Write-Host "vswhere expected at: $vswhere"
+          if (Test-Path $vswhere) {
+            & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          } else {
+            Write-Host "vswhere not found at $vswhere"
+            Write-Host "Listing contents of ${env:ProgramFiles(x86)}"
+            Get-ChildItem -Path ${env:ProgramFiles(x86)} -ErrorAction Ignore | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
