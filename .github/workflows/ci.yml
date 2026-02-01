@@ -24,7 +24,7 @@ jobs:
     - name: Locate MSBuild and build solution
       run: |
         Write-Host "Locating Visual Studio installation via vswhere..."
-        $vswhere = Join-Path $env:ProgramFiles(x86) 'Microsoft Visual Studio\Installer\vswhere.exe'
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'
         if (-Not (Test-Path $vswhere)) { Write-Error "vswhere.exe not found at $vswhere"; exit 1 }
         $inst = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
         if ([string]::IsNullOrWhiteSpace($inst)) { Write-Error "Visual Studio with MSBuild not found"; exit 1 }
