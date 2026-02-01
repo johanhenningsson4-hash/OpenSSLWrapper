@@ -54,9 +54,24 @@ jobs:
         Write-Host "Visual Studio installation: $inst"
 
         $v = Get-ChildItem -Path $inst -Recurse -Filter 'vstest.console.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-Not $v) { Write-Error "vstest.console.exe not found under Visual Studio installation: $inst"; exit 1 }
-        $vstest = $v.FullName
-        Write-Host "Using vstest: $vstest"
+        if ($v) {
+          $vstest = $v.FullName
+          Write-Host "Using vstest from Visual Studio installation: $vstest"
+        } else {
+          Write-Host "vstest.console.exe not found under Visual Studio installation: $inst"
+          Write-Host "Falling back to installing Microsoft.TestPlatform via NuGet"
+          $out = Join-Path $env:TEMP 'testplatform'
+          if (Test-Path $out) { Remove-Item -Recurse -Force $out }
+          nuget install Microsoft.TestPlatform -Version 16.11.0 -OutputDirectory $out | Out-Null
+          # Find installed package folder
+          $pkg = Get-ChildItem -Path $out -Directory | Where-Object { $_.Name -like 'Microsoft.TestPlatform*' } | Select-Object -First 1
+          if (-Not $pkg) { Write-Error "Failed to install Microsoft.TestPlatform via NuGet"; exit 1 }
+          $candidate = Join-Path $pkg.FullName 'tools\vstest.console.exe'
+          if (-Not (Test-Path $candidate)) { Write-Error "vstest.console.exe not found in NuGet package at $candidate"; exit 1 }
+          $vstest = $candidate
+          Write-Host "Using vstest from NuGet package: $vstest"
+        }
+
         & "$vstest" $testAssembly /EnableCodeCoverage /Logger:trx
       shell: powershell
 
