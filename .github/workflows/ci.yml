@@ -35,18 +35,7 @@ jobs:
         if (-Not $msbuild) { Write-Error "MSBuild.exe not found under Visual Studio installation"; exit 1 }
         Write-Host "Using MSBuild: $msbuild"
         & $msbuild "${{ github.workspace }}\OpenSLLWrapper.sln" /p:Configuration=Release /verbosity:minimal
-        # Force-build the test project explicitly to ensure the test assembly is produced
-        $testProj = "${{ github.workspace }}\OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj"
-        # Build the test project with an explicit OutputPath to avoid missing OutputPath/BaseOutputPath when building the project file directly
-        $projDir = Split-Path -Path $testProj -Parent
-        $explicitOut = Join-Path $projDir 'bin\Release\'
-        # Try the common VS platform name "Any CPU" first, then fall back to AnyCPU if needed
-        & $msbuild $testProj /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath="$explicitOut" /verbosity:minimal
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "Build with Platform='Any CPU' failed, retrying with Platform=AnyCPU and explicit OutputPath"
-          & $msbuild $testProj /p:Configuration=Release /p:Platform=AnyCPU /p:OutputPath="$explicitOut" /verbosity:minimal
-          if ($LASTEXITCODE -ne 0) { Write-Error "Failed to build test project"; exit 1 }
-        }
+        # Rely on the solution build above to produce the test assembly; do not build the test csproj directly
       shell: powershell
 
     - name: Run MSTest unit tests with VSTest
