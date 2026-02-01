@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenSLLWrapper", "OpenSLLWr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenSLLWrapper.Tests", "OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj", "{D5B0F6E2-4C2A-4F8E-9B2A-123456789ABC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BenchmarkSuite1", "BenchmarkSuite1\BenchmarkSuite1.csproj", "{A20861A9-411E-6150-BF5C-69E8196E5D22}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,8 +22,15 @@ Global
 		{D5B0F6E2-4C2A-4F8E-9B2A-123456789ABC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D5B0F6E2-4C2A-4F8E-9B2A-123456789ABC}.Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{D5B0F6E2-4C2A-4F8E-9B2A-123456789ABC}.Release|Any CPU.Build.0 = Debug|Any CPU
+		{A20861A9-411E-6150-BF5C-69E8196E5D22}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A20861A9-411E-6150-BF5C-69E8196E5D22}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A20861A9-411E-6150-BF5C-69E8196E5D22}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A20861A9-411E-6150-BF5C-69E8196E5D22}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {241047B8-87D3-4345-87FA-DCC246615973}
 	EndGlobalSection
 EndGlobal

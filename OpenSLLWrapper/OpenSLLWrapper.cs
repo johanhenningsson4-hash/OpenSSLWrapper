@@ -19,6 +19,7 @@ using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.X509;
 using Org.BouncyCastle.Utilities.IO.Pem;
 using System.Security.Cryptography;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -31,6 +32,86 @@ namespace OpenSLLWrapper
     /// </summary>
     public static class OpenSLLWrapper
     {
+        // Cache parsed private keys by SHA-256 of the PEM bytes to avoid reparsing on each sign operation.
+        private static readonly ConcurrentDictionary<string, AsymmetricKeyParameter> s_privateKeyCache = new ConcurrentDictionary<string, AsymmetricKeyParameter>();
+
+        // Per-key signer pools to reuse ISigner instances. Key is "{keyHash}:{mode}" where mode is "pss" or "pkcs1".
+        private static readonly ConcurrentDictionary<string, ConcurrentBag<ISigner>> s_signerPools = new ConcurrentDictionary<string, ConcurrentBag<ISigner>>();
+
+        private static string ComputeSha256Base64(byte[] data)
+        {
+            using (var sha = SHA256.Create())
+            {
+                return Convert.ToBase64String(sha.ComputeHash(data));
+            }
+        }
+
+        private static string SignWithPrivateKey(byte[] data, AsymmetricKeyParameter privateKey, bool usePss, string keyHash = null)
+        {
+            ISigner signer = null;
+            string poolKey = null;
+            if (!string.IsNullOrEmpty(keyHash))
+            {
+                poolKey = keyHash + ":" + (usePss ? "pss" : "pkcs1");
+                var bag = s_signerPools.GetOrAdd(poolKey, _ => new ConcurrentBag<ISigner>());
+                if (!bag.TryTake(out signer))
+                {
+                    signer = CreateNewSigner(usePss, privateKey);
+                }
+                else
+                {
+                    // Ensure signer is initialized for this key (re-init to be safe)
+                    signer.Init(true, privateKey);
+                }
+            }
+            else
+            {
+                signer = CreateNewSigner(usePss, privateKey);
+            }
+
+            try
+            {
+                signer.BlockUpdate(data, 0, data.Length);
+                var sig = signer.GenerateSignature();
+                return Convert.ToBase64String(sig);
+            }
+            finally
+            {
+                try
+                {
+                    signer.Reset();
+                }
+                catch
+                {
+                    // Ignore reset failures and don't return to pool
+                    signer = null;
+                }
+
+                if (signer != null && poolKey != null)
+                {
+                    var bag = s_signerPools.GetOrAdd(poolKey, _ => new ConcurrentBag<ISigner>());
+                    bag.Add(signer);
+                }
+            }
+        }
+
+        private static ISigner CreateNewSigner(bool usePss, AsymmetricKeyParameter privateKey)
+        {
+            if (!usePss)
+            {
+                var signer = SignerUtilities.GetSigner("SHA256withRSA");
+                signer.Init(true, privateKey);
+                return signer;
+            }
+            else
+            {
+                var digest = new Sha256Digest();
+                var engine = new RsaEngine();
+                var pss = new Org.BouncyCastle.Crypto.Signers.PssSigner(engine, digest, digest.GetDigestSize());
+                pss.Init(true, privateKey);
+                return pss;
+            }
+        }
         // -------------------- Key generation --------------------
 
         /// <summary>
@@ -160,32 +241,72 @@ namespace OpenSLLWrapper
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
             if (privateKeyPemStream == null) throw new ArgumentNullException(nameof(privateKeyPemStream));
-
-            object keyObj;
-            using (var sr = new StreamReader(privateKeyPemStream, Encoding.ASCII, false, 1024, leaveOpen: true))
-                keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+            // Try to obtain the raw PEM bytes for caching. If we can get bytes, compute a key hash and reuse parsed key.
+            byte[] keyBytes = null;
+            try
+            {
+                if (privateKeyPemStream is MemoryStream ms)
+                {
+                    keyBytes = ms.ToArray();
+                }
+                else if (privateKeyPemStream.CanSeek)
+                {
+                    long origPos = privateKeyPemStream.Position;
+                    privateKeyPemStream.Position = 0;
+                    using (var tmp = new MemoryStream())
+                    {
+                        privateKeyPemStream.CopyTo(tmp);
+                        keyBytes = tmp.ToArray();
+                    }
+                    privateKeyPemStream.Position = origPos;
+                }
+            }
+            catch
+            {
+                // If any IO error occurs, fall back to parsing directly from the stream without caching.
+                keyBytes = null;
+            }
 
             AsymmetricKeyParameter privateKey = null;
-            if (keyObj is AsymmetricCipherKeyPair kp) privateKey = kp.Private;
-            else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate) privateKey = akp;
-            else throw new InvalidOperationException("Unsupported private key format");
 
-            if (!usePss)
+            if (keyBytes != null)
             {
-                var signer = SignerUtilities.GetSigner("SHA256withRSA");
-                signer.Init(true, privateKey);
-                signer.BlockUpdate(data, 0, data.Length);
-                return Convert.ToBase64String(signer.GenerateSignature());
+                string keyHash = ComputeSha256Base64(keyBytes);
+                if (!s_privateKeyCache.TryGetValue(keyHash, out privateKey))
+                {
+                    // Parse and add to cache
+                    using (var sr = new StreamReader(new MemoryStream(keyBytes), Encoding.ASCII, false, 1024, leaveOpen: true))
+                    {
+                        var pr = new Org.BouncyCastle.OpenSsl.PemReader(sr);
+                        var keyObj = pr.ReadObject();
+                        if (keyObj is AsymmetricCipherKeyPair kp) privateKey = kp.Private;
+                        else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate) privateKey = akp;
+                        else throw new InvalidOperationException("Unsupported private key format");
+                    }
+
+                    s_privateKeyCache.TryAdd(keyHash, privateKey);
+                }
+                else
+                {
+                    // nothing
+                }
             }
-            else
+
+            if (privateKey == null)
             {
-                var digest = new Sha256Digest();
-                var engine = new RsaEngine();
-                var pss = new Org.BouncyCastle.Crypto.Signers.PssSigner(engine, digest, digest.GetDigestSize());
-                pss.Init(true, privateKey);
-                pss.BlockUpdate(data, 0, data.Length);
-                return Convert.ToBase64String(pss.GenerateSignature());
+                // Fallback: parse directly from provided stream (no caching)
+                object keyObj;
+                using (var sr = new StreamReader(privateKeyPemStream, Encoding.ASCII, false, 1024, leaveOpen: true))
+                    keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+
+                if (keyObj is AsymmetricCipherKeyPair kp) privateKey = kp.Private;
+                else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate) privateKey = akp;
+                else throw new InvalidOperationException("Unsupported private key format");
             }
+
+            // If we have a key hash, pass it so signer pooling can be used
+            string hashForPool = (keyBytes != null) ? ComputeSha256Base64(keyBytes) : null;
+            return SignWithPrivateKey(data, privateKey, usePss, hashForPool);
         }
 
         public static string SignChallengeData(byte[] data, byte[] privateKeyPem, bool usePss = false)
