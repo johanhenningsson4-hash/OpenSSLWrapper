@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Diagnostics;
 using OpenSLLWrapper;
+using OpenSLLWrapper.Logging;
 
 namespace OpenSLLWrapper.Tests
 {
@@ -22,36 +23,36 @@ namespace OpenSLLWrapper.Tests
                 string pkcs8Path = Path.Combine(tmp, "private_key_pkcs8.pem");
                 string pkcs1Roundtrip = Path.Combine(tmp, "private_key_roundtrip.pem");
 
-                OpenSLLWrapper.Logging.Log.Info("Generating RSA private key...");
+                Log.Info("Generating RSA private key...");
                 OpenSLLWrapper.GenerateRsaPrivateKey(privPath, 2048);
                 if (!File.Exists(privPath)) throw new Exception("private key not created");
-                OpenSLLWrapper.Logging.Log.Info("Private key created: " + privPath);
+                Log.Info("Private key created: " + privPath);
 
-                OpenSLLWrapper.Logging.Log.Info("Exporting public key...");
+                Log.Info("Exporting public key...");
                 OpenSLLWrapper.ExportPublicKeyPemFromPrivateKey(privPath, pubPath);
                 if (!File.Exists(pubPath)) throw new Exception("public key not created");
-                OpenSLLWrapper.Logging.Log.Info("Public key created: " + pubPath);
+                Log.Info("Public key created: " + pubPath);
 
-                OpenSLLWrapper.Logging.Log.Info("Generating CSR...");
+                Log.Info("Generating CSR...");
                 OpenSLLWrapper.GenerateCertificateSigningRequest(privPath, csrPath, "/C=US/ST=CA/L=San Francisco/O=Test/OU=Dev/CN=example.com");
                 if (!File.Exists(csrPath)) throw new Exception("CSR not created");
-                OpenSLLWrapper.Logging.Log.Info("CSR created: " + csrPath);
+                Log.Info("CSR created: " + csrPath);
 
-                OpenSLLWrapper.Logging.Log.Info("Signing challenge...");
+                Log.Info("Signing challenge...");
                 var challenge = Convert.ToBase64String(Encoding.UTF8.GetBytes("hello world"));
                 string signature = OpenSLLWrapper.SignBase64Challenge(challenge, privPath);
                 if (string.IsNullOrWhiteSpace(signature)) throw new Exception("signature empty");
-                OpenSLLWrapper.Logging.Log.Info("Signature (base64): " + signature.Substring(0, Math.Min(64, signature.Length)) + "...");
+                Log.Info("Signature (base64): " + signature.Substring(0, Math.Min(64, signature.Length)) + "...");
 
-                OpenSLLWrapper.Logging.Log.Info("Converting PKCS#1 -> PKCS#8...");
+                Log.Info("Converting PKCS#1 -> PKCS#8...");
                 OpenSLLWrapper.ConvertPkcs1ToPkcs8Pem(privPath, pkcs8Path);
                 if (!File.Exists(pkcs8Path)) throw new Exception("PKCS#8 file not created");
-                OpenSLLWrapper.Logging.Log.Info("PKCS#8 created: " + pkcs8Path);
+                Log.Info("PKCS#8 created: " + pkcs8Path);
 
-                OpenSLLWrapper.Logging.Log.Info("Converting PKCS#8 -> PKCS#1 (roundtrip)...");
+                Log.Info("Converting PKCS#8 -> PKCS#1 (roundtrip)...");
                 OpenSLLWrapper.ConvertPkcs8ToPkcs1Pem(pkcs8Path, pkcs1Roundtrip);
                 if (!File.Exists(pkcs1Roundtrip)) throw new Exception("PKCS#1 roundtrip file not created");
-                OpenSLLWrapper.Logging.Log.Info("PKCS#1 roundtrip created: " + pkcs1Roundtrip);
+                Log.Info("PKCS#1 roundtrip created: " + pkcs1Roundtrip);
 
                 // Interoperability tests with OpenSSL (if available)
                 Console.WriteLine("Checking for openssl in PATH...");
@@ -88,7 +89,7 @@ namespace OpenSLLWrapper.Tests
                         p.WaitForExit(5000);
                         if (!outp.Contains("Verified OK")) throw new Exception($"OpenSSL failed to verify our signature: stdout='{outp}' stderr='{errp}'");
                     }
-                    Console.WriteLine("OpenSSL verified signature produced by this library.");
+                    Log.Info("OpenSSL verified signature produced by this library.");
 
                     // Sign with OpenSSL and verify with our verifier
                     var signPi = new ProcessStartInfo("openssl", $"dgst -sha256 -sign \"{privPath}\" -out \"{opensslSig}\" \"{challengeBin}\"") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
@@ -104,14 +105,14 @@ namespace OpenSLLWrapper.Tests
                     string opensslSigB64 = Convert.ToBase64String(opensslSigBytes);
                     bool ok = OpenSLLWrapper.VerifyBase64Signature(Convert.ToBase64String(challengeData), opensslSigB64, pubPath);
                     if (!ok) throw new Exception("Library failed to verify signature produced by OpenSSL");
-                    Console.WriteLine("Library verified signature produced by OpenSSL.");
+                    Log.Info("Library verified signature produced by OpenSSL.");
                 }
                 else
                 {
-                    Console.WriteLine("OpenSSL not found in PATH; skipping interoperability tests.");
+                    Log.Warn("OpenSSL not found in PATH; skipping interoperability tests.");
                 }
 
-                OpenSLLWrapper.Logging.Log.Info("All tests passed.");
+                Log.Info("All tests passed.");
                 return 0;
             }
             catch (Exception ex)
