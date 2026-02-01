@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1
+
+    - name: Restore NuGet packages
+      run: nuget restore OpenSLLWrapper.sln
+
+    - name: Build solution
+      run: msbuild OpenSLLWrapper.sln /p:Configuration=Release
+
+    - name: Run test runner
+      run: |
+        .\OpenSLLWrapper.Tests\bin\Release\OpenSLLWrapper.Tests.exe
+      shell: powershell

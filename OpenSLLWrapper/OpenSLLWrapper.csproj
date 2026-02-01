@@ -44,6 +44,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Logging\Log.cs" />
     <Compile Include="OpenSLLWrapper.cs" />
     <Compile Include="OpenSslFacade.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
