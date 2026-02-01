@@ -104,6 +104,7 @@
     <ProjectReference Include="..\OpenSLLWrapper\OpenSLLWrapper.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AdditionalTests.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="SignerTests.cs" />
   </ItemGroup>
