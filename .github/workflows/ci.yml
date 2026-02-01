@@ -35,6 +35,8 @@ jobs:
         if (-Not $msbuild) { Write-Error "MSBuild.exe not found under Visual Studio installation"; exit 1 }
         Write-Host "Using MSBuild: $msbuild"
         & $msbuild "${{ github.workspace }}\OpenSLLWrapper.sln" /p:Configuration=Release /verbosity:minimal
+        # Force-build the test project explicitly to ensure the test assembly is produced
+        & $msbuild "${{ github.workspace }}\OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj" /p:Configuration=Release /verbosity:minimal
       shell: powershell
 
     - name: Run MSTest unit tests with VSTest
