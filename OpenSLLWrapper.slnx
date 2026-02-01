@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="OpenSLLWrapper.Tests/OpenSLLWrapper.Tests.csproj">
+    <BuildType Project="Debug" />
+  </Project>
+  <Project Path="OpenSLLWrapper/OpenSLLWrapper.csproj" />
+</Solution>

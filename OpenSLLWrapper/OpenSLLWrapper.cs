@@ -1,0 +1,416 @@
+﻿using System;
+using System.IO;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+// BouncyCastle
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Signers;
+using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.Asn1.Pkcs;
+using Org.BouncyCastle.Pkcs;
+using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.X509;
+using Org.BouncyCastle.Utilities.IO.Pem;
+
+namespace OpenSLLWrapper
+{
+    /// <summary>
+    /// Core managed operations implemented with BouncyCastle.
+    /// Public facade (OpenSslFacade) calls into these methods.
+    /// </summary>
+    public static class OpenSLLWrapper
+    {
+        // -------------------- Key generation --------------------
+
+        /// <summary>
+        /// Generate an RSA private key and write it to a PEM file (PKCS#1 "RSA PRIVATE KEY").
+        /// </summary>
+        public static void GenerateRsaPrivateKey(string outputPath, int keySize = 4096)
+        {
+            if (string.IsNullOrWhiteSpace(outputPath)) throw new ArgumentException("outputPath must be provided", nameof(outputPath));
+            if (keySize < 1024) throw new ArgumentOutOfRangeException(nameof(keySize));
+            using (var fs = File.Create(outputPath))
+                GenerateRsaPrivateKey(fs, keySize);
+        }
+
+        /// <summary>
+        /// Generate an RSA private key and write PEM into the provided stream (left open).
+        /// </summary>
+        public static void GenerateRsaPrivateKey(Stream outputStream, int keySize = 4096)
+        {
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (keySize < 1024) throw new ArgumentOutOfRangeException(nameof(keySize));
+
+            var gen = new RsaKeyPairGenerator();
+            gen.Init(new KeyGenerationParameters(new SecureRandom(), keySize));
+            AsymmetricCipherKeyPair kp = gen.GenerateKeyPair();
+
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true))
+            {
+                var pem = new Org.BouncyCastle.OpenSsl.PemWriter(sw);
+                pem.WriteObject(kp.Private);
+                sw.Flush();
+            }
+        }
+
+        /// <summary>
+        /// Generate RSA private key and return PEM bytes.
+        /// </summary>
+        public static byte[] GenerateRsaPrivateKeyBytes(int keySize = 4096)
+        {
+            using (var ms = new MemoryStream())
+            {
+                GenerateRsaPrivateKey(ms, keySize);
+                return ms.ToArray();
+            }
+        }
+
+        public static Task GenerateRsaPrivateKeyAsync(string outputPath, int keySize = 4096, CancellationToken cancellationToken = default)
+            => Task.Run(() => GenerateRsaPrivateKey(outputPath, keySize), cancellationToken);
+
+        // -------------------- CSR creation --------------------
+
+        public static void GenerateCertificateSigningRequest(string keyPath, string outputPath, string subject)
+        {
+            if (string.IsNullOrWhiteSpace(keyPath)) throw new ArgumentException(nameof(keyPath));
+            if (string.IsNullOrWhiteSpace(outputPath)) throw new ArgumentException(nameof(outputPath));
+            using (var inFs = File.OpenRead(keyPath))
+            using (var outFs = File.Create(outputPath))
+                GenerateCertificateSigningRequest(inFs, outFs, subject);
+        }
+
+        public static void GenerateCertificateSigningRequest(Stream privateKeyPemStream, Stream outputStream, string subject)
+        {
+            if (privateKeyPemStream == null) throw new ArgumentNullException(nameof(privateKeyPemStream));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (string.IsNullOrWhiteSpace(subject)) throw new ArgumentException(nameof(subject));
+
+            object keyObj;
+            using (var sr = new StreamReader(privateKeyPemStream, Encoding.ASCII, false, 1024, leaveOpen: true))
+            {
+                var pr = new Org.BouncyCastle.OpenSsl.PemReader(sr);
+                keyObj = pr.ReadObject();
+            }
+
+            AsymmetricKeyParameter privateKey;
+            AsymmetricKeyParameter publicKey;
+            if (keyObj is AsymmetricCipherKeyPair pair)
+            {
+                privateKey = pair.Private;
+                publicKey = pair.Public;
+            }
+            else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate)
+            {
+                privateKey = akp;
+                var rsaPriv = akp as RsaPrivateCrtKeyParameters;
+                if (rsaPriv == null) throw new InvalidOperationException("Unsupported private key type");
+                publicKey = new RsaKeyParameters(false, rsaPriv.Modulus, rsaPriv.PublicExponent);
+            }
+            else throw new InvalidOperationException("Unsupported key format");
+
+            string subj = subject.Trim();
+            if (subj.StartsWith("/"))
+            {
+                var parts = subj.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+                subj = string.Join(", ", parts);
+            }
+
+            var x509Name = new X509Name(subj);
+            var csr = new Pkcs10CertificationRequest("SHA256WITHRSA", x509Name, publicKey, null, privateKey);
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true))
+            {
+                var pem = new Org.BouncyCastle.OpenSsl.PemWriter(sw);
+                pem.WriteObject(csr);
+                sw.Flush();
+            }
+        }
+
+        public static byte[] GenerateCertificateSigningRequestBytes(byte[] privateKeyPem, string subject)
+        {
+            if (privateKeyPem == null) throw new ArgumentNullException(nameof(privateKeyPem));
+            using (var inMs = new MemoryStream(privateKeyPem))
+            using (var outMs = new MemoryStream())
+            {
+                GenerateCertificateSigningRequest(inMs, outMs, subject);
+                return outMs.ToArray();
+            }
+        }
+
+        public static Task GenerateCertificateSigningRequestAsync(string keyPath, string outputPath, string subject, CancellationToken cancellationToken = default)
+            => Task.Run(() => GenerateCertificateSigningRequest(keyPath, outputPath, subject), cancellationToken);
+
+        // -------------------- Signing --------------------
+
+        /// <summary>
+        /// Sign raw data using a private key PEM stream. Returns base64 signature.
+        /// Supports PKCS#1-v1_5 (default) and RSASSA-PSS if usePss=true.
+        /// </summary>
+        public static string SignChallengeData(byte[] data, Stream privateKeyPemStream, bool usePss = false)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            if (privateKeyPemStream == null) throw new ArgumentNullException(nameof(privateKeyPemStream));
+
+            object keyObj;
+            using (var sr = new StreamReader(privateKeyPemStream, Encoding.ASCII, false, 1024, leaveOpen: true))
+                keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+
+            AsymmetricKeyParameter privateKey = null;
+            if (keyObj is AsymmetricCipherKeyPair kp) privateKey = kp.Private;
+            else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate) privateKey = akp;
+            else throw new InvalidOperationException("Unsupported private key format");
+
+            if (!usePss)
+            {
+                var signer = SignerUtilities.GetSigner("SHA256withRSA");
+                signer.Init(true, privateKey);
+                signer.BlockUpdate(data, 0, data.Length);
+                return Convert.ToBase64String(signer.GenerateSignature());
+            }
+            else
+            {
+                var digest = new Sha256Digest();
+                var engine = new RsaEngine();
+                var pss = new Org.BouncyCastle.Crypto.Signers.PssSigner(engine, digest, digest.GetDigestSize());
+                pss.Init(true, privateKey);
+                pss.BlockUpdate(data, 0, data.Length);
+                return Convert.ToBase64String(pss.GenerateSignature());
+            }
+        }
+
+        public static string SignChallengeData(byte[] data, byte[] privateKeyPem, bool usePss = false)
+        {
+            if (privateKeyPem == null) throw new ArgumentNullException(nameof(privateKeyPem));
+            using (var ms = new MemoryStream(privateKeyPem))
+            {
+                return SignChallengeData(data, ms, usePss);
+            }
+        }
+
+        public static string SignBase64Challenge(string base64Challenge, string keyPath)
+        {
+            if (string.IsNullOrWhiteSpace(base64Challenge)) throw new ArgumentException(nameof(base64Challenge));
+            if (string.IsNullOrWhiteSpace(keyPath)) throw new ArgumentException(nameof(keyPath));
+            byte[] data = Convert.FromBase64String(base64Challenge);
+            using (var fs = File.OpenRead(keyPath)) return SignChallengeData(data, fs, usePss: false);
+        }
+
+        public static Task<string> SignBase64ChallengeAsync(string base64Challenge, string keyPath, CancellationToken cancellationToken = default)
+            => Task.Run(() => SignBase64Challenge(base64Challenge, keyPath), cancellationToken);
+
+        // -------------------- Verification --------------------
+
+        public static bool VerifyChallengeData(byte[] data, byte[] signature, Stream publicKeyPemStream, bool usePss = false)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            if (signature == null) throw new ArgumentNullException(nameof(signature));
+            if (publicKeyPemStream == null) throw new ArgumentNullException(nameof(publicKeyPemStream));
+
+            object keyObj;
+            using (var sr = new StreamReader(publicKeyPemStream, Encoding.ASCII, false, 1024, leaveOpen: true))
+                keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+
+            AsymmetricKeyParameter publicKey = null;
+            if (keyObj is AsymmetricKeyParameter akp && !akp.IsPrivate) publicKey = akp;
+            else if (keyObj is AsymmetricCipherKeyPair kp) publicKey = kp.Public;
+            else if (keyObj is X509Certificate cert) publicKey = cert.GetPublicKey();
+            else throw new InvalidOperationException("Unsupported public key format");
+
+            if (!usePss)
+            {
+                var verifier = SignerUtilities.GetSigner("SHA256withRSA");
+                verifier.Init(false, publicKey);
+                verifier.BlockUpdate(data, 0, data.Length);
+                return verifier.VerifySignature(signature);
+            }
+            else
+            {
+                var digest = new Sha256Digest();
+                var engine = new RsaEngine();
+                var pss = new Org.BouncyCastle.Crypto.Signers.PssSigner(engine, digest, digest.GetDigestSize());
+                pss.Init(false, publicKey);
+                pss.BlockUpdate(data, 0, data.Length);
+                return pss.VerifySignature(signature);
+            }
+        }
+
+        public static bool VerifyChallengeData(byte[] data, byte[] signature, byte[] publicKeyPem, bool usePss = false)
+        {
+            if (publicKeyPem == null) throw new ArgumentNullException(nameof(publicKeyPem));
+            using (var ms = new MemoryStream(publicKeyPem)) return VerifyChallengeData(data, signature, ms, usePss);
+        }
+
+        public static bool VerifyBase64Signature(string base64Challenge, string base64Signature, string publicKeyPath, bool usePss = false)
+        {
+            if (string.IsNullOrWhiteSpace(base64Challenge)) throw new ArgumentException(nameof(base64Challenge));
+            if (string.IsNullOrWhiteSpace(base64Signature)) throw new ArgumentException(nameof(base64Signature));
+            if (string.IsNullOrWhiteSpace(publicKeyPath)) throw new ArgumentException(nameof(publicKeyPath));
+            byte[] data = Convert.FromBase64String(base64Challenge);
+            byte[] sig = Convert.FromBase64String(base64Signature);
+            using (var fs = File.OpenRead(publicKeyPath)) return VerifyChallengeData(data, sig, fs, usePss);
+        }
+
+        // -------------------- PKCS format conversions & public key export --------------------
+
+        public static void ConvertPkcs1ToPkcs8Pem(string pkcs1Path, string pkcs8Path)
+        {
+            using (var inFs = File.OpenRead(pkcs1Path))
+            using (var outFs = File.Create(pkcs8Path)) ConvertPkcs1ToPkcs8Pem(inFs, outFs);
+        }
+
+        public static void ConvertPkcs1ToPkcs8Pem(Stream pkcs1Stream, Stream outputStream)
+        {
+            object keyObj;
+            using (var sr = new StreamReader(pkcs1Stream, Encoding.ASCII, false, 1024, leaveOpen: true)) keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+            AsymmetricKeyParameter privateKey = (keyObj is AsymmetricCipherKeyPair p) ? p.Private : keyObj as AsymmetricKeyParameter;
+            if (privateKey == null || !privateKey.IsPrivate) throw new InvalidOperationException("Unsupported key format");
+            var pkInfo = PrivateKeyInfoFactory.CreatePrivateKeyInfo(privateKey);
+            var pkcs8 = pkInfo.ToAsn1Object().GetEncoded();
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true)) new Org.BouncyCastle.OpenSsl.PemWriter(sw).WriteObject(new Org.BouncyCastle.Utilities.IO.Pem.PemObject("PRIVATE KEY", pkcs8));
+        }
+
+        public static byte[] ConvertPkcs1ToPkcs8PemBytes(byte[] pkcs1Pem)
+        {
+            using (var inMs = new MemoryStream(pkcs1Pem))
+            using (var outMs = new MemoryStream()) { ConvertPkcs1ToPkcs8Pem(inMs, outMs); return outMs.ToArray(); }
+        }
+
+        public static void ConvertPkcs8ToPkcs1Pem(string pkcs8Path, string pkcs1Path)
+        {
+            using (var inFs = File.OpenRead(pkcs8Path))
+            using (var outFs = File.Create(pkcs1Path)) ConvertPkcs8ToPkcs1Pem(inFs, outFs);
+        }
+
+        public static void ConvertPkcs8ToPkcs1Pem(Stream pkcs8Stream, Stream outputStream)
+        {
+            object keyObj;
+            using (var sr = new StreamReader(pkcs8Stream, Encoding.ASCII, false, 1024, leaveOpen: true)) keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+            AsymmetricKeyParameter privateKey = (keyObj is AsymmetricCipherKeyPair p) ? p.Private : keyObj as AsymmetricKeyParameter;
+            if (privateKey == null || !privateKey.IsPrivate) throw new InvalidOperationException("Unsupported key format");
+            var rsaPriv = privateKey as RsaPrivateCrtKeyParameters;
+            if (rsaPriv == null) throw new InvalidOperationException("Not an RSA key");
+            var rsaStruct = new RsaPrivateKeyStructure(rsaPriv.Modulus, rsaPriv.PublicExponent, rsaPriv.Exponent, rsaPriv.P, rsaPriv.Q, rsaPriv.DP, rsaPriv.DQ, rsaPriv.QInv);
+            var pkcs1 = rsaStruct.ToAsn1Object().GetEncoded();
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true)) new Org.BouncyCastle.OpenSsl.PemWriter(sw).WriteObject(new Org.BouncyCastle.Utilities.IO.Pem.PemObject("RSA PRIVATE KEY", pkcs1));
+        }
+
+        public static byte[] ConvertPkcs8ToPkcs1PemBytes(byte[] pkcs8Pem)
+        {
+            using (var inMs = new MemoryStream(pkcs8Pem))
+            using (var outMs = new MemoryStream()) { ConvertPkcs8ToPkcs1Pem(inMs, outMs); return outMs.ToArray(); }
+        }
+
+        public static void ExportPublicKeyPemFromPrivateKey(string keyPath, string outputPath)
+        {
+            using (var inFs = File.OpenRead(keyPath))
+            using (var outFs = File.Create(outputPath)) ExportPublicKeyPemFromPrivateKey(inFs, outFs);
+        }
+
+        public static void ExportPublicKeyPemFromPrivateKey(Stream privateKeyPemStream, Stream outputStream)
+        {
+            object keyObj;
+            using (var sr = new StreamReader(privateKeyPemStream, Encoding.ASCII, false, 1024, leaveOpen: true)) keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+            AsymmetricKeyParameter publicKey = null;
+            if (keyObj is AsymmetricCipherKeyPair p) publicKey = p.Public;
+            else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate)
+            {
+                var rsa = akp as RsaPrivateCrtKeyParameters;
+                if (rsa == null) throw new InvalidOperationException("Unsupported private key");
+                publicKey = new RsaKeyParameters(false, rsa.Modulus, rsa.PublicExponent);
+            }
+            else if (keyObj is AsymmetricKeyParameter akpub && !akpub.IsPrivate) publicKey = akpub;
+            else throw new InvalidOperationException("Unsupported key format");
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true)) new Org.BouncyCastle.OpenSsl.PemWriter(sw).WriteObject(publicKey);
+        }
+
+        public static byte[] ExportPublicKeyPemFromPrivateKeyBytes(byte[] privateKeyPem)
+        {
+            using (var inMs = new MemoryStream(privateKeyPem))
+            using (var outMs = new MemoryStream()) { ExportPublicKeyPemFromPrivateKey(inMs, outMs); return outMs.ToArray(); }
+        }
+
+        // --- Encrypted PKCS#8 support ---
+        private class StringPasswordFinder : Org.BouncyCastle.OpenSsl.IPasswordFinder
+        {
+            private readonly char[] _pw;
+            public StringPasswordFinder(string password) { _pw = password?.ToCharArray() ?? throw new ArgumentNullException(nameof(password)); }
+            public char[] GetPassword() => (char[])_pw.Clone();
+        }
+
+        public static void ExportEncryptedPkcs8Pem(string inputPrivateKeyPath, string outputPkcs8Path, string password)
+        {
+            using (var inFs = File.OpenRead(inputPrivateKeyPath))
+            using (var outFs = File.Create(outputPkcs8Path))
+                ExportEncryptedPkcs8Pem(inFs, outFs, password);
+        }
+
+        public static void ExportEncryptedPkcs8Pem(Stream inputPrivateKeyStream, Stream outputStream, string password)
+        {
+            if (inputPrivateKeyStream == null) throw new ArgumentNullException(nameof(inputPrivateKeyStream));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (password == null) throw new ArgumentNullException(nameof(password));
+
+            object keyObj;
+            using (var sr = new StreamReader(inputPrivateKeyStream, Encoding.ASCII, false, 1024, leaveOpen: true))
+                keyObj = new Org.BouncyCastle.OpenSsl.PemReader(sr).ReadObject();
+
+            AsymmetricKeyParameter privateKey = null;
+            if (keyObj is AsymmetricCipherKeyPair kp) privateKey = kp.Private;
+            else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate) privateKey = akp;
+            else throw new InvalidOperationException("Unsupported private key format");
+
+            var gen = new Org.BouncyCastle.OpenSsl.Pkcs8Generator(privateKey, Org.BouncyCastle.OpenSsl.Pkcs8Generator.PbeSha1_3DES);
+            gen.Password = password.ToCharArray();
+
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true))
+            {
+                new Org.BouncyCastle.OpenSsl.PemWriter(sw).WriteObject(gen);
+                sw.Flush();
+            }
+        }
+
+        public static void ImportEncryptedPkcs8ToPkcs1Pem(string encryptedPkcs8Path, string password, string outputPkcs1Path)
+        {
+            using (var inFs = File.OpenRead(encryptedPkcs8Path))
+            using (var outFs = File.Create(outputPkcs1Path))
+                ImportEncryptedPkcs8ToPkcs1Pem(inFs, password, outFs);
+        }
+
+        public static void ImportEncryptedPkcs8ToPkcs1Pem(Stream encryptedPkcs8Stream, string password, Stream outputStream)
+        {
+            if (encryptedPkcs8Stream == null) throw new ArgumentNullException(nameof(encryptedPkcs8Stream));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (password == null) throw new ArgumentNullException(nameof(password));
+
+            object keyObj;
+            using (var sr = new StreamReader(encryptedPkcs8Stream, Encoding.ASCII, false, 1024, leaveOpen: true))
+            {
+                var pr = new Org.BouncyCastle.OpenSsl.PemReader(sr, new StringPasswordFinder(password));
+                keyObj = pr.ReadObject();
+            }
+
+            AsymmetricKeyParameter privateKey = null;
+            if (keyObj is AsymmetricCipherKeyPair kp) privateKey = kp.Private;
+            else if (keyObj is AsymmetricKeyParameter akp && akp.IsPrivate) privateKey = akp;
+            else throw new InvalidOperationException("Unsupported encrypted PKCS#8 format");
+
+            using (var sw = new StreamWriter(outputStream, Encoding.ASCII, 1024, leaveOpen: true))
+            {
+                new Org.BouncyCastle.OpenSsl.PemWriter(sw).WriteObject(privateKey);
+                sw.Flush();
+            }
+        }
+
+        public static Task ExportEncryptedPkcs8PemAsync(string inputPrivateKeyPath, string outputPkcs8Path, string password, CancellationToken cancellationToken = default)
+            => Task.Run(() => ExportEncryptedPkcs8Pem(inputPrivateKeyPath, outputPkcs8Path, password), cancellationToken);
+
+        public static Task ImportEncryptedPkcs8ToPkcs1PemAsync(string encryptedPkcs8Path, string password, string outputPkcs1Path, CancellationToken cancellationToken = default)
+            => Task.Run(() => ImportEncryptedPkcs8ToPkcs1Pem(encryptedPkcs8Path, password, outputPkcs1Path), cancellationToken);
+    }
+}
