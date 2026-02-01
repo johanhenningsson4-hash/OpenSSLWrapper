@@ -1,0 +1,9 @@
+<Project>
+  <!-- Ensure building the test project directly with Configuration=Release works without specifying OutputPath -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'OpenSLLWrapper.Tests' and '$(Configuration)|$(Platform)' == 'Release|AnyCPU'">
+    <OutputPath>bin\\Release\\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'OpenSLLWrapper.Tests' and '$(Configuration)|$(Platform)' == 'Debug|AnyCPU'">
+    <OutputPath>bin\\Debug\\</OutputPath>
+  </PropertyGroup>
+</Project>
