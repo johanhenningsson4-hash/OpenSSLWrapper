@@ -45,7 +45,21 @@ jobs:
         if (-Not $testFile) { Write-Error "Test assembly not found under ${{ github.workspace }}"; exit 1 }
         $testAssembly = $testFile.FullName
         Write-Host "Found test assembly: $testAssembly"
-        & vstest.console.exe $testAssembly /EnableCodeCoverage /Logger:trx
+
+        # Locate vstest.console.exe under the Visual Studio installation in ProgramFiles(x86)
+        $vstest = $null
+        $searchRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio'
+        if (Test-Path $searchRoot) {
+          $v = Get-ChildItem -Path $searchRoot -Recurse -Filter 'vstest.console.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($v) { $vstest = $v.FullName }
+        }
+        if (-Not $vstest) {
+          Write-Error "vstest.console.exe not found under $searchRoot; ensure Visual Studio Test Platform is installed"
+          exit 1
+        }
+
+        Write-Host "Using vstest: $vstest"
+        & "$vstest" $testAssembly /EnableCodeCoverage /Logger:trx
       shell: powershell
 
     - name: Upload TRX test results
