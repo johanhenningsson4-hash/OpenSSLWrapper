@@ -1,4 +1,6 @@
-# OpenSLLWrapper
+# Open OpenSLLWrapper
+
+Version: 1.0.1
 
 Managed .NET wrapper for RSA key operations, PEM conversions and signing/verification using BouncyCastle.
 
