@@ -1,0 +1,76 @@
+name: Create NuGet package
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Set to true to publish packages to nuget.org'
+        required: false
+        default: 'false'
+
+jobs:
+  pack:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Restore NuGet packages
+        run: |
+          nuget restore OpenSLLWrapper.sln
+        shell: powershell
+
+      - name: Locate MSBuild via vswhere
+        shell: pwsh
+        run: |
+          Write-Host "Locating Visual Studio installation via vswhere..."
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'
+          if (-Not (Test-Path $vswhere)) { Write-Error "vswhere.exe not found at $vswhere"; exit 1 }
+          $inst = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          if ([string]::IsNullOrWhiteSpace($inst)) { Write-Error "Visual Studio with MSBuild not found"; exit 1 }
+          Write-Host "Visual Studio installation: $inst"
+          $candidates = @( (Join-Path $inst 'MSBuild\\Current\\Bin\\MSBuild.exe'), (Join-Path $inst 'MSBuild\\15.0\\Bin\\MSBuild.exe'), (Join-Path $inst 'Common7\\IDE\\MSBuild\\Current\\Bin\\MSBuild.exe') )
+          $msbuild = $null
+          foreach ($c in $candidates) { if (Test-Path $c) { $msbuild = $c; break } }
+          if (-Not $msbuild) { Write-Error "MSBuild.exe not found under Visual Studio installation"; exit 1 }
+          Write-Host "Using MSBuild: $msbuild"
+          Set-Variable -Name MSBUILD_PATH -Value $msbuild -Scope Global
+
+      - name: Build solution (Release)
+        shell: pwsh
+        run: |
+          & $env:MSBUILD_PATH "${{ github.workspace }}\\OpenSLLWrapper.sln" /p:Configuration=Release /verbosity:minimal
+
+      - name: Pack NuGet package
+        shell: powershell
+        run: |
+          # Pack the project into a nupkg. Adjust metadata in a .nuspec if you need custom package fields.
+          $out = Join-Path "${{ github.workspace }}" "artifacts"
+          if (-Not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
+          nuget pack "${{ github.workspace }}\\OpenSLLWrapper\\OpenSLLWrapper.csproj" -Properties Configuration=Release -IncludeReferencedProjects -OutputDirectory $out
+          Write-Host "NuGet packages created in: $out"
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Publish to nuget.org
+        if: >-
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' && secrets.NUGET_API_KEY != '')
+          || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && secrets.NUGET_API_KEY != '')
+        shell: powershell
+        run: |
+          Write-Host "Publishing NuGet package(s) to nuget.org"
+          $pkgs = Get-ChildItem -Path "${{ github.workspace }}\artifacts" -Recurse -Filter "*.nupkg" -ErrorAction SilentlyContinue
+          if (-Not $pkgs) { Write-Host "No .nupkg files found in artifacts, skipping publish"; exit 0 }
+          foreach ($p in $pkgs) {
+            Write-Host "Pushing $($p.FullName)"
+            nuget push $p.FullName -Source https://api.nuget.org/v3/index.json -ApiKey $env:NUGET_API_KEY
+          }
