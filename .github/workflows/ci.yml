@@ -46,18 +46,16 @@ jobs:
         $testAssembly = $testFile.FullName
         Write-Host "Found test assembly: $testAssembly"
 
-        # Locate vstest.console.exe under the Visual Studio installation in ProgramFiles(x86)
-        $vstest = $null
-        $searchRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio'
-        if (Test-Path $searchRoot) {
-          $v = Get-ChildItem -Path $searchRoot -Recurse -Filter 'vstest.console.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($v) { $vstest = $v.FullName }
-        }
-        if (-Not $vstest) {
-          Write-Error "vstest.console.exe not found under $searchRoot; ensure Visual Studio Test Platform is installed"
-          exit 1
-        }
+        # Use vswhere to find the Visual Studio installation, then locate vstest.console.exe there
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'
+        if (-Not (Test-Path $vswhere)) { Write-Error "vswhere.exe not found at $vswhere"; exit 1 }
+        $inst = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+        if ([string]::IsNullOrWhiteSpace($inst)) { Write-Error "Visual Studio with MSBuild not found"; exit 1 }
+        Write-Host "Visual Studio installation: $inst"
 
+        $v = Get-ChildItem -Path $inst -Recurse -Filter 'vstest.console.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-Not $v) { Write-Error "vstest.console.exe not found under Visual Studio installation: $inst"; exit 1 }
+        $vstest = $v.FullName
         Write-Host "Using vstest: $vstest"
         & "$vstest" $testAssembly /EnableCodeCoverage /Logger:trx
       shell: powershell
