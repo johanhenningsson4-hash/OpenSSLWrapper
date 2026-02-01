@@ -18,6 +18,10 @@ using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.X509;
 using Org.BouncyCastle.Utilities.IO.Pem;
+using System.Security.Cryptography;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace OpenSLLWrapper
 {
@@ -333,6 +337,186 @@ namespace OpenSLLWrapper
         {
             using (var inMs = new MemoryStream(privateKeyPem))
             using (var outMs = new MemoryStream()) { ExportPublicKeyPemFromPrivateKey(inMs, outMs); return outMs.ToArray(); }
+        }
+
+        // -------------------- Safe storage helpers --------------------
+
+        /// <summary>
+        /// Write PEM bytes to a file and restrict filesystem ACL to the current user only.
+        /// This avoids accidental world-readable private key files on multi-user systems.
+        /// </summary>
+        /// <param name="path">Path to write the PEM file.</param>
+        /// <param name="pemBytes">PEM bytes to write.</param>
+        public static void SavePemFileSecure(string path, byte[] pemBytes)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(nameof(path));
+            if (pemBytes == null) throw new ArgumentNullException(nameof(pemBytes));
+
+            // Write file (overwrite)
+            File.WriteAllBytes(path, pemBytes);
+
+            try
+            {
+                // Build a restrictive ACL: remove inheritance and grant FullControl to the current user only
+                var fileInfo = new FileInfo(path);
+                var security = fileInfo.GetAccessControl();
+                // Disable inheritance and remove existing rules
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+                // Remove all existing rules
+                var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, targetType: typeof(SecurityIdentifier));
+                foreach (FileSystemAccessRule rule in rules)
+                {
+                    security.RemoveAccessRule(rule);
+                }
+
+                // Grant current user FullControl
+                var sid = WindowsIdentity.GetCurrent().User;
+                if (sid == null) throw new InvalidOperationException("Unable to get current user SID");
+                var userRule = new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow);
+                security.AddAccessRule(userRule);
+
+                fileInfo.SetAccessControl(security);
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // On non-Windows platforms or restricted environments, ignore ACL changes
+            }
+            catch (Exception)
+            {
+                // If ACL modification fails, do not crash; caller can choose to delete the file.
+            }
+        }
+
+        /// <summary>
+        /// Encrypt PEM bytes with a password using PBKDF2 (HMAC-SHA256) to derive keys and AES-CBC for confidentiality
+        /// and HMAC-SHA256 for integrity (encrypt-then-MAC). Writes a binary blob containing: version(1)|salt(16)|iv(16)|ciphertext|hmac(32).
+        /// </summary>
+        public static void SavePemFileEncrypted(string path, byte[] pemBytes, string password, int iterations = 100_000)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(nameof(path));
+            if (pemBytes == null) throw new ArgumentNullException(nameof(pemBytes));
+            if (string.IsNullOrEmpty(password)) throw new ArgumentException("password required", nameof(password));
+
+            // salt and iv
+            byte[] salt = new byte[16];
+            byte[] iv = new byte[16];
+            using (var rng = new RNGCryptoServiceProvider())
+            {
+                rng.GetBytes(salt);
+                rng.GetBytes(iv);
+            }
+
+            // derive keys (32 bytes enc key, 32 bytes mac key)
+            byte[] encKey, macKey;
+            using (var kdf = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256))
+            {
+                encKey = kdf.GetBytes(32);
+                macKey = kdf.GetBytes(32);
+            }
+
+            byte[] cipher;
+            using (var aes = new AesManaged { KeySize = 256, Mode = CipherMode.CBC, Padding = PaddingMode.PKCS7 })
+            {
+                aes.Key = encKey;
+                aes.IV = iv;
+                using (var encryptor = aes.CreateEncryptor())
+                using (var ms = new MemoryStream())
+                using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
+                {
+                    cs.Write(pemBytes, 0, pemBytes.Length);
+                    cs.FlushFinalBlock();
+                    cipher = ms.ToArray();
+                }
+            }
+
+            // build blob and compute HMAC
+            using (var msAll = new MemoryStream())
+            using (var hmac = new HMACSHA256(macKey))
+            {
+                msAll.WriteByte(0x01); // version
+                msAll.Write(salt, 0, salt.Length);
+                msAll.Write(iv, 0, iv.Length);
+                msAll.Write(cipher, 0, cipher.Length);
+                byte[] blobNoMac = msAll.ToArray();
+                byte[] tag = hmac.ComputeHash(blobNoMac);
+                using (var outFs = File.Create(path))
+                {
+                    outFs.Write(blobNoMac, 0, blobNoMac.Length);
+                    outFs.Write(tag, 0, tag.Length);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Read a file produced by SavePemFileEncrypted and decrypt it using the provided password.
+        /// </summary>
+        public static byte[] LoadPemFileEncrypted(string path, string password, int iterations = 100_000)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(nameof(path));
+            if (!File.Exists(path)) throw new FileNotFoundException("File not found", path);
+            if (string.IsNullOrEmpty(password)) throw new ArgumentException("password required", nameof(password));
+
+            byte[] all = File.ReadAllBytes(path);
+            if (all.Length < 1 + 16 + 16 + 32) throw new InvalidOperationException("File too small or corrupt");
+            int pos = 0;
+            byte version = all[pos++];
+            if (version != 0x01) throw new InvalidOperationException("Unsupported blob version");
+            byte[] salt = new byte[16]; Array.Copy(all, pos, salt, 0, 16); pos += 16;
+            byte[] iv = new byte[16]; Array.Copy(all, pos, iv, 0, 16); pos += 16;
+            int macLen = 32;
+            int cipherLen = all.Length - pos - macLen;
+            if (cipherLen <= 0) throw new InvalidOperationException("Invalid blob layout");
+            byte[] cipher = new byte[cipherLen]; Array.Copy(all, pos, cipher, 0, cipherLen); pos += cipherLen;
+            byte[] tag = new byte[macLen]; Array.Copy(all, pos, tag, 0, macLen);
+
+            // derive keys
+            byte[] encKey, macKey;
+            using (var kdf = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256))
+            {
+                encKey = kdf.GetBytes(32);
+                macKey = kdf.GetBytes(32);
+            }
+
+            // verify HMAC
+            byte[] blobNoMac = new byte[1 + salt.Length + iv.Length + cipher.Length];
+            using (var ms = new MemoryStream())
+            {
+                ms.WriteByte(0x01);
+                ms.Write(salt, 0, salt.Length);
+                ms.Write(iv, 0, iv.Length);
+                ms.Write(cipher, 0, cipher.Length);
+                blobNoMac = ms.ToArray();
+            }
+            using (var hmac = new HMACSHA256(macKey))
+            {
+                var expected = hmac.ComputeHash(blobNoMac);
+                if (!CryptographicEquals(expected, tag)) throw new CryptographicException("HMAC validation failed");
+            }
+
+            // decrypt
+            using (var aes = new AesManaged { KeySize = 256, Mode = CipherMode.CBC, Padding = PaddingMode.PKCS7 })
+            {
+                aes.Key = encKey;
+                aes.IV = iv;
+                using (var decryptor = aes.CreateDecryptor())
+                using (var ms = new MemoryStream(cipher))
+                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
+                using (var outMs = new MemoryStream())
+                {
+                    cs.CopyTo(outMs);
+                    return outMs.ToArray();
+                }
+            }
+        }
+
+        private static bool CryptographicEquals(byte[] a, byte[] b)
+        {
+            if (a == null || b == null) return false;
+            if (a.Length != b.Length) return false;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
+            return diff == 0;
         }
 
         // --- Encrypted PKCS#8 support ---

@@ -59,3 +59,30 @@ Contributing
 
 License
 - Check repository root for license information.
+
+Secure PEM storage examples
+ - Save a PEM file and restrict filesystem ACLs (Windows):
+
+```csharp
+// Generate private key bytes
+var pkPem = OpenSLLWrapper.GenerateRsaPrivateKeyBytes(2048);
+// Save to file and restrict ACLs so only current user can access
+OpenSLLWrapper.SavePemFileSecure("C:\\keys\\private_key.pem", pkPem);
+```
+
+ - Password-protect PEM file (portable):
+
+```csharp
+var pkPem = OpenSLLWrapper.GenerateRsaPrivateKeyBytes(2048);
+string password = "s3cureP@ssw0rd";
+OpenSLLWrapper.SavePemFileEncrypted("C:\\keys\\private_key.enc", pkPem, password);
+
+// Later: read and decrypt
+byte[] decrypted = OpenSLLWrapper.LoadPemFileEncrypted("C:\\keys\\private_key.enc", password);
+// Use the decrypted bytes (PEM) with existing helpers
+var pubPem = OpenSLLWrapper.ExportPublicKeyPemFromPrivateKeyBytes(decrypted);
+```
+
+Notes
+- `SavePemFileSecure` attempts to restrict filesystem ACLs on Windows only; on non-Windows platforms it will write the file without ACL modifications.
+- `SavePemFileEncrypted` uses a password-based scheme (PBKDF2 with HMAC-SHA256, AES-256-CBC and HMAC-SHA256 for integrity). Keep your password secure and consider using a stronger iteration count for high-security scenarios.
