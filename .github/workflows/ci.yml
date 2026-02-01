@@ -16,11 +16,11 @@ jobs:
     - name: Setup NuGet
       uses: NuGet/setup-nuget@v1
 
-    - name: Restore NuGet packages
-      run: nuget restore OpenSLLWrapper.sln
-
-    - name: Build solution
-      run: msbuild OpenSLLWrapper.sln /p:Configuration=Release
+    - name: Restore NuGet packages and build solution
+      run: |
+        nuget restore OpenSLLWrapper.sln
+        msbuild OpenSLLWrapper.sln /p:Configuration=Release
+      shell: powershell
 
     - name: Run test runner
       run: |
