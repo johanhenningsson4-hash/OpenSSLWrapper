@@ -36,7 +36,14 @@ jobs:
         Write-Host "Using MSBuild: $msbuild"
         & $msbuild "${{ github.workspace }}\OpenSLLWrapper.sln" /p:Configuration=Release /verbosity:minimal
         # Force-build the test project explicitly to ensure the test assembly is produced
-        & $msbuild "${{ github.workspace }}\OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj" /p:Configuration=Release /verbosity:minimal
+        $testProj = "${{ github.workspace }}\OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj"
+        # Try the common VS platform name "Any CPU" first, then fall back to AnyCPU if needed
+        & $msbuild $testProj /p:Configuration=Release /p:Platform="Any CPU" /verbosity:minimal
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "Build with Platform='Any CPU' failed, retrying with Platform=AnyCPU"
+          & $msbuild $testProj /p:Configuration=Release /p:Platform=AnyCPU /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { Write-Error "Failed to build test project"; exit 1 }
+        }
       shell: powershell
 
     - name: Run MSTest unit tests with VSTest
