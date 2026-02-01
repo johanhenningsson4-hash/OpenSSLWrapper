@@ -39,7 +39,9 @@ jobs:
           foreach ($c in $candidates) { if (Test-Path $c) { $msbuild = $c; break } }
           if (-Not $msbuild) { Write-Error "MSBuild.exe not found under Visual Studio installation"; exit 1 }
           Write-Host "Using MSBuild: $msbuild"
-          Set-Variable -Name MSBUILD_PATH -Value $msbuild -Scope Global
+          # Persist MSBuild path for subsequent steps via GITHUB_ENV
+          # Use Add-Content to avoid emitting a UTF-8 BOM which can make the env value invalid for the call operator
+          Add-Content -Path $env:GITHUB_ENV -Value "MSBUILD_PATH=$msbuild"
 
       - name: Build solution (Release)
         shell: pwsh
