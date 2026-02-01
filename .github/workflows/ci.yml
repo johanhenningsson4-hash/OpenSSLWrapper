@@ -40,8 +40,11 @@ jobs:
     - name: Run MSTest unit tests with VSTest
       run: |
         Write-Host "Running MSTest tests via vstest.console.exe"
-        $testAssembly = Join-Path -Path "${{ github.workspace }}" -ChildPath "OpenSLLWrapper.Tests\bin\Release\OpenSLLWrapper.Tests.exe"
-        if (-Not (Test-Path $testAssembly)) { Write-Error "Test assembly not found: $testAssembly"; exit 1 }
+        # Locate the built test assembly dynamically (handles varying checkout paths)
+        $testFile = Get-ChildItem -Path "${{ github.workspace }}" -Recurse -Filter "OpenSLLWrapper.Tests.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-Not $testFile) { Write-Error "Test assembly not found under ${{ github.workspace }}"; exit 1 }
+        $testAssembly = $testFile.FullName
+        Write-Host "Found test assembly: $testAssembly"
         & vstest.console.exe $testAssembly /EnableCodeCoverage /Logger:trx
       shell: powershell
 
