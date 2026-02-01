@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      DEBUG_CI: 'false'
 
     steps:
     - uses: actions/checkout@v4
@@ -35,6 +37,13 @@ jobs:
         if (-Not $msbuild) { Write-Error "MSBuild.exe not found under Visual Studio installation"; exit 1 }
         Write-Host "Using MSBuild: $msbuild"
         & $msbuild "${{ github.workspace }}\OpenSLLWrapper.sln" /p:Configuration=Release /verbosity:minimal
+        # Optional debug logs: enable by setting DEBUG_CI=true in job env
+        if ($env:DEBUG_CI -and $env:DEBUG_CI.ToLower() -eq 'true') {
+          Write-Host "DEBUG: Listing repository top-level directories"
+          Get-ChildItem -Path "${{ github.workspace }}" -Directory | ForEach-Object { Write-Host $_.FullName }
+          Write-Host "DEBUG: Listing potential bin\Release folders"
+          Get-ChildItem -Path "${{ github.workspace }}" -Recurse -Filter "bin" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+        }
         # Rely on the solution build above to produce the test assembly; do not build the test csproj directly
       shell: powershell
 
@@ -46,6 +55,11 @@ jobs:
         if (-Not $testFile) { Write-Error "Test assembly not found under ${{ github.workspace }}"; exit 1 }
         $testAssembly = $testFile.FullName
         Write-Host "Found test assembly: $testAssembly"
+        if ($env:DEBUG_CI -and $env:DEBUG_CI.ToLower() -eq 'true') {
+          Write-Host "DEBUG: test assembly full path: $testAssembly"
+          Write-Host "DEBUG: Listing test assembly directory contents"
+          Get-ChildItem -Path (Split-Path -Path $testAssembly -Parent) -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Name }
+        }
 
         # Use vswhere to find the Visual Studio installation, then locate vstest.console.exe there
         $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\\Installer\\vswhere.exe'
