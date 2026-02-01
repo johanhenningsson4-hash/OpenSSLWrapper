@@ -105,6 +105,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="SignerTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
