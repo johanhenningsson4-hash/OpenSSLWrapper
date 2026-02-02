@@ -1,0 +1,82 @@
+name: Publish NuGet package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up variables
+        id: vars
+        run: |
+          # Determine the tag name (for push on tag or for release)
+          $ref = '${{ github.event_name }}'
+          if ($ref -eq 'release') {
+              $tag = '${{ github.event.release.tag_name }}'
+          } else {
+              $tag = '${{ github.ref_name }}'
+          }
+          if ($tag.StartsWith('v')) { $tag = $tag.Substring(1) }
+          Write-Host "::set-output name=version::$tag"
+
+      - name: Ensure .tools directory and download nuget.exe
+        run: |
+          $tools = Join-Path $env:GITHUB_WORKSPACE '.tools'
+          if (-not (Test-Path $tools)) { New-Item -ItemType Directory -Path $tools | Out-Null }
+          $nugetExe = Join-Path $tools 'nuget.exe'
+          if (-not (Test-Path $nugetExe)) {
+              Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -OutFile $nugetExe -UseBasicParsing
+          }
+
+      - name: Build project (Release)
+        run: |
+          $proj = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper\OpenSLLWrapper.csproj'
+          msbuild $proj /t:Build /p:Configuration=Release
+
+      - name: Pack nupkg (use nuspec if present)
+        run: |
+          $workspace = $env:GITHUB_WORKSPACE
+          $version = '${{ steps.vars.outputs.version }}'
+          $tools = Join-Path $workspace '.tools'
+          $nugetExe = Join-Path $tools 'nuget.exe'
+
+          $nuspec = Join-Path $workspace 'OpenSLLWrapper\OpenSLLWrapper.nuspec'
+          $artifacts = Join-Path $workspace 'artifacts'
+          if (-not (Test-Path $artifacts)) { New-Item -ItemType Directory -Path $artifacts | Out-Null }
+
+          if (Test-Path $nuspec) {
+              & $nugetExe pack $nuspec -Version $version -OutputDirectory $artifacts
+          } else {
+              $proj = Join-Path $workspace 'OpenSLLWrapper\OpenSLLWrapper.csproj'
+              & $nugetExe pack $proj -Properties Configuration=Release -Version $version -OutputDirectory $artifacts -IncludeReferencedProjects
+          }
+
+      - name: Find nupkg
+        id: findpkg
+        run: |
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          $pkg = Get-ChildItem $artifacts -Filter '*.nupkg' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $pkg) { throw 'No nupkg found in artifacts' }
+          Write-Host "Found package: $($pkg.FullName)"
+          Write-Host "::set-output name=path::$($pkg.FullName)"
+
+      - name: Push package to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if (-not $env:NUGET_API_KEY) { throw 'NUGET_API_KEY secret is not set' }
+          $nuget = Join-Path $env:GITHUB_WORKSPACE '.tools\nuget.exe'
+          $pkg = '${{ steps.findpkg.outputs.path }}'
+          & $nuget push $pkg $env:NUGET_API_KEY -Source 'https://api.nuget.org/v3/index.json'

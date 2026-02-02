@@ -91,9 +91,16 @@ if (Get-Command dotnet -ErrorAction SilentlyContinue) {
 }
 if ($LASTEXITCODE -ne 0) { Fail "MSBuild failed with exit code $LASTEXITCODE" }
 
-# Pack using nuget.exe
+# Pack using nuget.exe (prefer .nuspec if present so README/icon are included)
 Write-Host "Packing nupkg (version: $Version) ..."
-$packArgs = @('pack', $projPath, '-Properties', "Configuration=Release", '-Version', $Version, '-OutputDirectory', $artifacts, '-IncludeReferencedProjects')
+$nuspecPath = Join-Path (Join-Path $root 'OpenSLLWrapper') 'OpenSLLWrapper.nuspec'
+if (Test-Path $nuspecPath) {
+    Write-Host "Found nuspec: $nuspecPath - using nuspec to pack (includes README/icon)"
+    $packArgs = @('pack', $nuspecPath, '-Version', $Version, '-OutputDirectory', $artifacts)
+} else {
+    $packArgs = @('pack', $projPath, '-Properties', "Configuration=Release", '-Version', $Version, '-OutputDirectory', $artifacts, '-IncludeReferencedProjects')
+}
+
 $packResult = & $nugetExe @packArgs
 if ($LASTEXITCODE -ne 0) { Fail "nuget pack failed with exit code $LASTEXITCODE`n$packResult" }
 

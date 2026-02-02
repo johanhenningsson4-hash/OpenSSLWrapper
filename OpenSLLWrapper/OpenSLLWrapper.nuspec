@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>OpenSLLWrapper</id>
+    <version>$version$</version>
+    <title>OpenSLLWrapper</title>
+    <authors>Johan Henningsson</authors>
+    <owners>Johan Henningsson</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>OpenSLLWrapper is a lightweight .NET Framework library that provides helpers for RSA key generation, PEM conversions, signing and verification. It uses BouncyCastle under the hood and exposes convenient stream and byte[] overloads for interoperable cryptographic operations.</description>
+    <summary>Helpers for RSA key/PEM handling and signing (BouncyCastle-backed).</summary>
+    <!-- Include README.md from the package root so nuget.org can render it -->
+    <readme>README.md</readme>
+    <!-- Reference an embedded icon file included in the package -->
+    <icon>icon.png</icon>
+    <!-- SPDX license expression for the package -->
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/johanhenningsson4-hash/OpenSSLWrapper</projectUrl>
+    <repository type="git" url="https://github.com/johanhenningsson4-hash/OpenSSLWrapper" />
+    <copyright>Copyright (c) Johan Henningsson</copyright>
+    <tags>openssl rsa pem signing bouncycastle</tags>
+  </metadata>
+  <files>
+    <!-- Include the repository README at the package root so it is available as the readme -->
+    <file src="..\README.md" target="" />
+    <!-- Include the icon file from the OpenSLLWrapper project folder -->
+    <file src="icon.png" target="" />
+  </files>
+</package>
