@@ -110,6 +110,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
+    <None Include="OpenSLLWrapper.Tests.netcore.csproj" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
