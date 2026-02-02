@@ -29,7 +29,8 @@ jobs:
               $tag = '${{ github.ref_name }}'
           }
           if ($tag.StartsWith('v')) { $tag = $tag.Substring(1) }
-          Write-Host "::set-output name=version::$tag"
+          # Use the GITHUB_OUTPUT file to set outputs (set-output is deprecated)
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$tag"
 
       - name: Ensure .tools directory and download nuget.exe
         run: |
@@ -40,10 +41,28 @@ jobs:
               Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -OutFile $nugetExe -UseBasicParsing
           }
 
+      - name: Setup MSBuild (make msbuild available on PATH)
+        uses: microsoft/setup-msbuild@v1
+
+
       - name: Build project (Release)
         run: |
           $proj = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper\OpenSLLWrapper.csproj'
-          msbuild $proj /t:Build /p:Configuration=Release
+          # Try msbuild on PATH first
+          $msbuildCmd = (Get-Command msbuild -ErrorAction SilentlyContinue)?.Path
+          if (-not $msbuildCmd) {
+              # Try to locate MSBuild via vswhere
+              $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+              if (Test-Path $vswhere) {
+                  $instPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+                  if ($instPath) {
+                      $candidate = Join-Path $instPath 'MSBuild\Current\Bin\MSBuild.exe'
+                      if (Test-Path $candidate) { $msbuildCmd = $candidate }
+                  }
+              }
+          }
+          if (-not $msbuildCmd) { throw 'MSBuild not found on runner. Ensure Visual Studio Build Tools or setup-msbuild action is available.' }
+          & $msbuildCmd $proj /t:Build /p:Configuration=Release
 
       - name: Pack nupkg (use nuspec if present)
         run: |
@@ -70,7 +89,8 @@ jobs:
           $pkg = Get-ChildItem $artifacts -Filter '*.nupkg' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $pkg) { throw 'No nupkg found in artifacts' }
           Write-Host "Found package: $($pkg.FullName)"
-          Write-Host "::set-output name=path::$($pkg.FullName)"
+          # Use the GITHUB_OUTPUT file to set outputs (set-output is deprecated)
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$($pkg.FullName)"
 
       - name: Push package to nuget.org
         env:
