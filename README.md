@@ -1,8 +1,8 @@
 # OpenSLLWrapper
 
-Version: 1.0.1
+Version: 1.0.2
 
-Release: v1.0.1
+Release: v1.0.2
 
 This release includes a small version bump and packaging metadata updates (nuspec, README and icon included in package).
 
