@@ -49,7 +49,20 @@ jobs:
           $proj = 'OpenSLLWrapper\OpenSLLWrapper.csproj'
           $out = 'artifacts'
           mkdir $out -Force | Out-Null
-          dotnet pack $proj -c Release -o $out /p:PackageVersion=$version --no-build
+          # Produce both the nupkg and symbol snupkg
+          dotnet pack $proj -c Release -o $out /p:PackageVersion=$version --no-build /p:IncludeSymbols=true /p:SymbolPackageFormat=snupkg
+
+      - name: Validate nupkg contents (README + icon)
+        run: |
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          $nupkg = Get-ChildItem $artifacts -Filter '*.nupkg' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $nupkg) { throw 'No nupkg found for validation' }
+          Write-Host "Validating package: $($nupkg.FullName)"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $entries = [System.IO.Compression.ZipFile]::OpenRead($nupkg.FullName).Entries | ForEach-Object { $_.FullName }
+          if (-not ($entries -contains 'README.md')) { throw 'README.md not found in package root' }
+          if (-not ($entries -contains 'icon.png')) { throw 'icon.png not found in package root' }
+          Write-Host 'Package validation passed: README.md and icon.png are present.'
 
       - name: Find nupkg
         id: findpkg
