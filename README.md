@@ -1,10 +1,14 @@
 # OpenSLLWrapper
 
-Version: 1.0.2
+Version: 1.0.3
 
-Release: v1.0.2
+Release: v1.0.3
 
-This release includes a small version bump and packaging metadata updates (nuspec, README and icon included in package).
+This release includes a small version bump and packaging/CI updates:
+- Packaging now uses SDK-style `dotnet pack` (no `.nuspec`) and includes README + icon in the nupkg.
+- A symbols package (`.snupkg`) is generated and pushed to NuGet.
+- CI validates produced `.nupkg` contains `README.md` and `icon.png` and runs the test suite before packaging.
+- Tests project has been converted to an SDK-style project so CI uses `dotnet test`.
 
 Managed .NET wrapper for RSA key operations, PEM conversions and signing/verification using BouncyCastle.
 
