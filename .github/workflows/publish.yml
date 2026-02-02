@@ -32,55 +32,24 @@ jobs:
           # Use the GITHUB_OUTPUT file to set outputs (set-output is deprecated)
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$tag"
 
-      - name: Ensure .tools directory and download nuget.exe
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Restore
+        run: dotnet restore OpenSLLWrapper/OpenSLLWrapper.csproj
+
+      - name: Build (Release)
+        run: dotnet build OpenSLLWrapper/OpenSLLWrapper.csproj -c Release --no-restore
+
+      - name: Pack package (dotnet pack)
         run: |
-          $tools = Join-Path $env:GITHUB_WORKSPACE '.tools'
-          if (-not (Test-Path $tools)) { New-Item -ItemType Directory -Path $tools | Out-Null }
-          $nugetExe = Join-Path $tools 'nuget.exe'
-          if (-not (Test-Path $nugetExe)) {
-              Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -OutFile $nugetExe -UseBasicParsing
-          }
-
-      - name: Setup MSBuild (make msbuild available on PATH)
-        uses: microsoft/setup-msbuild@v1
-
-
-      - name: Build project (Release)
-        run: |
-          $proj = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper\OpenSLLWrapper.csproj'
-          # Try msbuild on PATH first
-          $msbuildCmd = (Get-Command msbuild -ErrorAction SilentlyContinue)?.Path
-          if (-not $msbuildCmd) {
-              # Try to locate MSBuild via vswhere
-              $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-              if (Test-Path $vswhere) {
-                  $instPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
-                  if ($instPath) {
-                      $candidate = Join-Path $instPath 'MSBuild\Current\Bin\MSBuild.exe'
-                      if (Test-Path $candidate) { $msbuildCmd = $candidate }
-                  }
-              }
-          }
-          if (-not $msbuildCmd) { throw 'MSBuild not found on runner. Ensure Visual Studio Build Tools or setup-msbuild action is available.' }
-          & $msbuildCmd $proj /t:Build /p:Configuration=Release
-
-      - name: Pack nupkg (use nuspec if present)
-        run: |
-          $workspace = $env:GITHUB_WORKSPACE
           $version = '${{ steps.vars.outputs.version }}'
-          $tools = Join-Path $workspace '.tools'
-          $nugetExe = Join-Path $tools 'nuget.exe'
-
-          $nuspec = Join-Path $workspace 'OpenSLLWrapper\OpenSLLWrapper.nuspec'
-          $artifacts = Join-Path $workspace 'artifacts'
-          if (-not (Test-Path $artifacts)) { New-Item -ItemType Directory -Path $artifacts | Out-Null }
-
-          if (Test-Path $nuspec) {
-              & $nugetExe pack $nuspec -Version $version -OutputDirectory $artifacts
-          } else {
-              $proj = Join-Path $workspace 'OpenSLLWrapper\OpenSLLWrapper.csproj'
-              & $nugetExe pack $proj -Properties Configuration=Release -Version $version -OutputDirectory $artifacts -IncludeReferencedProjects
-          }
+          $proj = 'OpenSLLWrapper\OpenSLLWrapper.csproj'
+          $out = 'artifacts'
+          mkdir $out -Force | Out-Null
+          dotnet pack $proj -c Release -o $out /p:PackageVersion=$version --no-build
 
       - name: Find nupkg
         id: findpkg
@@ -89,7 +58,6 @@ jobs:
           $pkg = Get-ChildItem $artifacts -Filter '*.nupkg' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $pkg) { throw 'No nupkg found in artifacts' }
           Write-Host "Found package: $($pkg.FullName)"
-          # Use the GITHUB_OUTPUT file to set outputs (set-output is deprecated)
           Add-Content -Path $env:GITHUB_OUTPUT -Value "path=$($pkg.FullName)"
 
       - name: Push package to nuget.org
@@ -97,6 +65,5 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           if (-not $env:NUGET_API_KEY) { throw 'NUGET_API_KEY secret is not set' }
-          $nuget = Join-Path $env:GITHUB_WORKSPACE '.tools\nuget.exe'
           $pkg = '${{ steps.findpkg.outputs.path }}'
-          & $nuget push $pkg $env:NUGET_API_KEY -Source 'https://api.nuget.org/v3/index.json'
+          dotnet nuget push $pkg -k $env:NUGET_API_KEY -s https://api.nuget.org/v3/index.json --skip-duplicate
