@@ -43,6 +43,46 @@ jobs:
       - name: Build (Release)
         run: dotnet build OpenSLLWrapper/OpenSLLWrapper.csproj -c Release --no-restore
 
+      - name: Restore NuGet packages for tests
+        run: |
+          $tools = Join-Path $env:GITHUB_WORKSPACE '.tools'
+          if (-not (Test-Path $tools)) { New-Item -ItemType Directory -Path $tools | Out-Null }
+          $nugetExe = Join-Path $tools 'nuget.exe'
+          if (-not (Test-Path $nugetExe)) {
+              Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -OutFile $nugetExe -UseBasicParsing
+          }
+          # Restore packages for the test project (packages.config)
+          & $nugetExe restore OpenSLLWrapper.Tests\packages.config -PackagesDirectory "$env:GITHUB_WORKSPACE\packages"
+
+      - name: Setup MSBuild for tests
+        uses: microsoft/setup-msbuild@v1
+
+      - name: Build and run tests (MSTest)
+        run: |
+          # Build test project with MSBuild to ensure packages.config references are resolved
+          $testProj = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj'
+          $msbuild = (Get-Command msbuild -ErrorAction SilentlyContinue)?.Path
+          if (-not $msbuild) {
+              $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+              if (Test-Path $vswhere) {
+                  $instPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+                  if ($instPath) { $msbuild = Join-Path $instPath 'MSBuild\Current\Bin\MSBuild.exe' }
+              }
+          }
+          if (-not $msbuild) { throw 'MSBuild not found on runner.' }
+          & $msbuild $testProj /t:Build /p:Configuration=Release
+
+          # Locate vstest.console.exe and run tests
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere.exe not found' }
+          $inst = & $vswhere -latest -products * -requires Microsoft.Component.TestTools.Core -property installationPath
+          $vstest = Join-Path $inst 'Common7\IDE\Extensions\TestPlatform\vstest.console.exe'
+          if (-not (Test-Path $vstest)) { throw 'vstest.console.exe not found' }
+          $testDll = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper.Tests\bin\Release\OpenSLLWrapper.Tests.dll'
+          if (-not (Test-Path $testDll)) { $testDll = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper.Tests\bin\Release\OpenSLLWrapper.Tests.exe' }
+          if (-not (Test-Path $testDll)) { throw 'Test assembly not found' }
+          & $vstest $testDll
+
       - name: Pack package (dotnet pack)
         run: |
           $version = '${{ steps.vars.outputs.version }}'
