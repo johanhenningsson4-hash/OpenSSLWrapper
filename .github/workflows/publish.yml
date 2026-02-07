@@ -57,9 +57,14 @@ jobs:
       - name: Setup MSBuild for tests
         uses: microsoft/setup-msbuild@v1
 
-      - name: Build and run tests (MSTest)
+      - name: Build and run tests
         run: |
-          # Build test project with MSBuild to ensure packages.config references are resolved
+          # Run the new SDK-style unit tests with dotnet test
+          Write-Host "Running Unit Tests..."
+          dotnet test OpenSLLWrapper.UnitTests/OpenSLLWrapper.UnitTests.csproj -c Release --no-restore --logger "console;verbosity=normal"
+          
+          # Legacy integration tests - Build test project with MSBuild to ensure packages.config references are resolved
+          Write-Host "Running Integration Tests..."
           $testProj = Join-Path $env:GITHUB_WORKSPACE 'OpenSLLWrapper.Tests\OpenSLLWrapper.Tests.csproj'
           $msbuild = (Get-Command msbuild -ErrorAction SilentlyContinue)?.Path
           if (-not $msbuild) {

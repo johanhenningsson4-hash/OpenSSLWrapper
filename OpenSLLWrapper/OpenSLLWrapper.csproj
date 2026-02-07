@@ -54,6 +54,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="OpenSLLWrapper.csproj.new" />
+    <None Include="OpenSLLWrapper.csproj.sdk" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
