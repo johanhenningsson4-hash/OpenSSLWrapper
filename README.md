@@ -1,12 +1,18 @@
 # OpenSLLWrapper
 
-Version: 1.2.0
+Version: 1.2.1
 
-Release: v1.2.0
+Release: v1.2.1
 
-This feature release adds SSH key format support and enhanced configuration management:
+This patch release includes minor updates and improvements:
 
-**New Features (v1.2.0):**
+**Updates (v1.2.1):**
+- Documentation improvements and code refinements
+- Enhanced error handling and validation
+- Performance optimizations for configuration management
+- Updated dependencies and build pipeline improvements
+
+**Features (v1.2.0):**
 - **SSH Key Support**: Convert between PEM and OpenSSH formats for public/private keys
 - **Enhanced Configuration**: Centralized configuration management with performance tuning and security policies
 - **Key Pair Generation**: Direct SSH key pair generation with comments and passphrase protection
