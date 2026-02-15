@@ -1,24 +1,25 @@
 # OpenSLLWrapper
 
-Version: 1.1.0
+Version: 1.2.0
 
-Release: v1.1.0
+Release: v1.2.0
 
-This major feature release adds comprehensive certificate management and JOSE (JWT/JWS/JWE) support:
+This feature release adds SSH key format support and enhanced configuration management:
 
-**New Features:**
+**New Features (v1.2.0):**
+- **SSH Key Support**: Convert between PEM and OpenSSH formats for public/private keys
+- **Enhanced Configuration**: Centralized configuration management with performance tuning and security policies
+- **Key Pair Generation**: Direct SSH key pair generation with comments and passphrase protection
+- **SSH Key Validation**: Format validation and metadata extraction for SSH public keys
+- **Performance Controls**: Configurable signer pooling, caching, and parallelism settings
+
+**Previous Features (v1.1.0):**
 - **Certificate Management**: Create self-signed certificates, sign CSRs, convert PEM?PFX formats, certificate validation
 - **JWT Operations**: Create and verify JSON Web Tokens with RSA signatures (RS256, RS384, RS512, PS256, PS384, PS512)
 - **JWS Operations**: Sign and verify JSON Web Signatures for arbitrary JSON payloads
 - **JWE Operations**: Encrypt and decrypt JSON payloads with RSA public/private keys (RSA-OAEP, A256GCM)
 - **Type-safe APIs**: Strongly-typed result objects with helper methods for claim extraction
 - **Comprehensive Test Coverage**: 60+ unit tests covering new certificate and JOSE functionality
-
-**Previous Release (v1.0.3):**
-- Packaging now uses SDK-style `dotnet pack` (no `.nuspec`) and includes README + icon in the nupkg.
-- A symbols package (`.snupkg`) is generated and pushed to NuGet.
-- CI validates produced `.nupkg` contains `README.md` and `icon.png` and runs the test suite before packaging.
-- Tests project has been converted to an SDK-style project so CI uses `dotnet test`.
 
 Managed .NET wrapper for RSA key operations, PEM conversions, signing/verification, certificate management, and JOSE operations using BouncyCastle.
 
@@ -32,6 +33,8 @@ Features
 - **Encrypted Keys**: Export/import encrypted PKCS#8 (password-protected) PEM
 - **Certificate Management**: Create self-signed certificates, sign CSRs, convert between PEM/PFX formats
 - **JOSE Operations**: JWT creation/verification, JWS signing/verification, JWE encryption/decryption
+- **SSH Key Support**: Convert PEM?SSH formats, generate SSH key pairs, validate SSH key formats
+- **Configuration Management**: Centralized settings for performance, security policies, and operational behavior
 - **Stream Support**: All operations provide stream and byte[] overloads to avoid filesystem I/O
 - **Async Support**: Task wrappers for file-based operations
 
@@ -98,6 +101,46 @@ if (result.IsValid)
 {
     Console.WriteLine($"User ID: {result.GetClaim<int>("userId")}");
 }
+```
+
+**SSH Key Operations** (`SshKeyFacade`):
+```csharp
+// generate SSH key pair
+var keyPair = SshKeyFacade.GenerateSshKeyPair(
+    keySize: 2048,
+    comment: "user@workstation",
+    privateKeyPassphrase: "secure_passphrase");
+
+// save to SSH directory
+File.WriteAllText("~/.ssh/id_rsa.pub", keyPair.PublicKey);
+File.WriteAllBytes("~/.ssh/id_rsa", keyPair.PrivateKeyBytes);
+
+// convert existing PEM to SSH format
+string sshPublicKey = SshKeyFacade.ConvertPemToSshPublicKey(
+    "public_key.pem", 
+    "user@example.com");
+```
+
+**Configuration Management** (`OpenSslWrapperConfig`):
+```csharp
+// configure default settings
+OpenSslWrapperConfig.DefaultKeySize = 4096;
+OpenSslWrapperConfig.DefaultJwtAlgorithm = JwtAlgorithm.PS256;
+OpenSslWrapperConfig.DefaultJwtExpirationMinutes = 30;
+
+// performance tuning
+OpenSslWrapperConfig.SignerPoolSize = 8;
+OpenSslWrapperConfig.MaxDegreeOfParallelism = 4;
+
+// security policies
+OpenSslWrapperConfig.MinimumKeySize = 2048;
+OpenSslWrapperConfig.SetAllowedJwtAlgorithms(new[] {
+    JwtAlgorithm.PS256, JwtAlgorithm.PS384, JwtAlgorithm.PS512
+});
+
+// get current configuration
+var config = OpenSslWrapperConfig.GetCurrentConfiguration();
+Console.WriteLine(config.ToString());
 ```
 
 Running tests / examples
