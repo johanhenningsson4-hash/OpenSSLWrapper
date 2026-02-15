@@ -1,27 +1,39 @@
 # OpenSLLWrapper
 
-Version: 1.0.3
+Version: 1.1.0
 
-Release: v1.0.3
+Release: v1.1.0
 
-This release includes a small version bump and packaging/CI updates:
+This major feature release adds comprehensive certificate management and JOSE (JWT/JWS/JWE) support:
+
+**New Features:**
+- **Certificate Management**: Create self-signed certificates, sign CSRs, convert PEM?PFX formats, certificate validation
+- **JWT Operations**: Create and verify JSON Web Tokens with RSA signatures (RS256, RS384, RS512, PS256, PS384, PS512)
+- **JWS Operations**: Sign and verify JSON Web Signatures for arbitrary JSON payloads
+- **JWE Operations**: Encrypt and decrypt JSON payloads with RSA public/private keys (RSA-OAEP, A256GCM)
+- **Type-safe APIs**: Strongly-typed result objects with helper methods for claim extraction
+- **Comprehensive Test Coverage**: 60+ unit tests covering new certificate and JOSE functionality
+
+**Previous Release (v1.0.3):**
 - Packaging now uses SDK-style `dotnet pack` (no `.nuspec`) and includes README + icon in the nupkg.
 - A symbols package (`.snupkg`) is generated and pushed to NuGet.
 - CI validates produced `.nupkg` contains `README.md` and `icon.png` and runs the test suite before packaging.
 - Tests project has been converted to an SDK-style project so CI uses `dotnet test`.
 
-Managed .NET wrapper for RSA key operations, PEM conversions and signing/verification using BouncyCastle.
+Managed .NET wrapper for RSA key operations, PEM conversions, signing/verification, certificate management, and JOSE operations using BouncyCastle.
 
 Features
-- Generate RSA private keys (PKCS#1 PEM) and export as bytes/streams/files.
-- Create Certificate Signing Requests (CSR) from private key PEMs.
-- Sign raw data and base64-encoded challenges using SHA256withRSA (PKCS#1 v1.5) and optional RSASSA-PSS (SHA-256).
-- Verify signatures (file/stream/byte[] overloads) for both PKCS#1-v1_5 and PSS.
-- Convert between PKCS#1 and PKCS#8 PEM formats (file/stream/byte[]).
-- Export public key PEM derived from a private key PEM.
-- Export/import encrypted PKCS#8 (password-protected) PEM.
-- All operations provide stream and byte[] overloads to avoid filesystem I/O.
-- Async Task wrappers for file-based operations.
+- **RSA Key Operations**: Generate RSA private keys (PKCS#1 PEM) and export as bytes/streams/files
+- **Certificate Signing Requests (CSR)**: Create CSRs from private key PEMs
+- **Digital Signatures**: Sign raw data and base64-encoded challenges using SHA256withRSA (PKCS#1 v1.5) and optional RSASSA-PSS (SHA-256)
+- **Signature Verification**: Verify signatures (file/stream/byte[] overloads) for both PKCS#1-v1_5 and PSS
+- **Format Conversions**: Convert between PKCS#1 and PKCS#8 PEM formats (file/stream/byte[])
+- **Public Key Export**: Export public key PEM derived from a private key PEM
+- **Encrypted Keys**: Export/import encrypted PKCS#8 (password-protected) PEM
+- **Certificate Management**: Create self-signed certificates, sign CSRs, convert between PEM/PFX formats
+- **JOSE Operations**: JWT creation/verification, JWS signing/verification, JWE encryption/decryption
+- **Stream Support**: All operations provide stream and byte[] overloads to avoid filesystem I/O
+- **Async Support**: Task wrappers for file-based operations
 
 Requirements
 - .NET Framework 4.7.2
@@ -29,14 +41,16 @@ Requirements
 - (Optional) OpenSSL on PATH for interoperability tests
 
 Projects
-- `OpenSLLWrapper` - library with all helpers (uses BouncyCastle)
+- `OpenSLLWrapper` - main library with RSA operations, certificate management, and JOSE support (uses BouncyCastle)
 - `OpenSLLWrapper.Tests` - console test runner that exercises generation, CSR, signing, conversion and OpenSSL interoperability checks (if OpenSSL is available)
+- `OpenSLLWrapper.UnitTests` - comprehensive unit test suite with MSTest framework covering all major functionality
 
 Quick start
 1. Restore NuGet packages (restore `packages.config` in `OpenSLLWrapper`).
 2. Build solution (Visual Studio or MSBuild).
-3. Use the `OpenSslFacade` class as the public API entry point, for example:
+3. Use the facade classes as public API entry points:
 
+**RSA Operations** (`OpenSslFacade`):
 ```csharp
 // generate key
 OpenSslFacade.GenerateRsaPrivateKey("private_key.pem", 2048);
@@ -50,6 +64,40 @@ string sigB64 = OpenSslFacade.SignBase64Challenge(challengeB64, "private_key.pem
 
 // verify signature
 bool ok = OpenSLLWrapper.VerifyBase64Signature(challengeB64, sigB64, "public_key.pem");
+```
+
+**Certificate Operations** (`CertificateFacade`):
+```csharp
+// create self-signed certificate
+var cert = CertificateFacade.CreateSelfSignedCertificate(
+    "private_key.pem", 
+    "CN=test.example.com,O=Test Corp", 
+    TimeSpan.FromDays(365));
+
+// convert PEM to PFX
+CertificateFacade.ConvertPemToPfx(
+    "certificate.pem", 
+    "private_key.pem", 
+    "certificate.pfx", 
+    "password");
+```
+
+**JWT Operations** (`JoseFacade`):
+```csharp
+// create JWT
+var payload = new { userId = 123, username = "john", roles = new[] { "user" } };
+string jwt = JoseFacade.CreateJwt(
+    payload, 
+    "jwt_private_key.pem", 
+    expirationMinutes: 30,
+    issuer: "MyApp");
+
+// verify JWT
+var result = JoseFacade.VerifyJwt(jwt, "jwt_public_key.pem", expectedIssuer: "MyApp");
+if (result.IsValid)
+{
+    Console.WriteLine($"User ID: {result.GetClaim<int>("userId")}");
+}
 ```
 
 Running tests / examples
